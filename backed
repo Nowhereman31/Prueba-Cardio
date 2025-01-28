@@ -1,0 +1,104 @@
+function doGet(e) {
+  // Cargamos la plantilla 'Index.html'
+  const template = HtmlService.createTemplateFromFile('Index');
+  // Renderizamos la plantilla
+  let output = template.evaluate()
+      .setTitle("Prueba Cardio")
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  
+  return output;
+}
+
+function include(filename) {
+  return HtmlService.createTemplateFromFile(filename).getRawContent();
+}
+
+function doPost(e) {
+  try {
+    // 1. Extraer campos del formulario
+    let identificacion    = e.parameter.identificacion;  // p.ej. "123"
+    let nombre            = e.parameter.nombre;
+    let apellido          = e.parameter.apellido;
+    let genero            = e.parameter.genero;
+    let fechaNacimiento   = e.parameter.fechaNacimiento;  // "YYYY-MM-DD"
+    let correoElectronico = e.parameter.correoElectronico;
+
+    // 2. Extraer también ingresos y gastos
+    //    y conviértelos a número para poder calcular el saldo.
+    let ingresos = parseInt(e.parameter.ingresos, 10);
+    let gastos   = parseInt(e.parameter.gastos, 10);
+    let saldo    = ingresos - gastos;
+
+    // 3. Conectar a MySQL (Clever Cloud)
+    let conn = getDBConnection();
+
+    // 4. Insertar en la tabla 'Paciente'
+    //    Suponemos que 'id' es la PK y NO es autoincrement (depende de tu definición).
+    let sqlPaciente = `
+      INSERT INTO Paciente
+        (id, nombre, apellido, genero, fecha_nacimiento, correo_electronico)
+      VALUES
+        (?, ?, ?, ?, ?, ?)
+    `;
+    let stmt1 = conn.prepareStatement(sqlPaciente);
+    stmt1.setString(1, identificacion);    // si 'id' en Paciente es INT, podrías usar setInt(1, parseInt(identificacion))
+    stmt1.setString(2, nombre);
+    stmt1.setString(3, apellido);
+    stmt1.setString(4, genero);
+    stmt1.setString(5, fechaNacimiento);
+    stmt1.setString(6, correoElectronico);
+    let filasPac   = stmt1.executeUpdate();
+    stmt1.close();
+
+    // 5. Insertar en la tabla 'Informacion_financiera'
+    //    - 'id' es auto_increment, así que no lo incluimos.
+    //    - 'paciente_id' es la misma 'identificacion' (PK de Paciente)
+    //    - 'ingresos', 'gastos', y 'saldo'
+    let sqlFinanciera = `
+      INSERT INTO Informacion_financiera
+        (paciente_id, ingresos, gastos, saldo)
+      VALUES
+        (?, ?, ?, ?)
+    `;
+    let stmt2 = conn.prepareStatement(sqlFinanciera);
+    stmt2.setInt(1, parseInt(identificacion, 10));  // si paciente_id es INT
+    stmt2.setInt(2, ingresos);
+    stmt2.setInt(3, gastos);
+    stmt2.setInt(4, saldo);
+    let filasFin = stmt2.executeUpdate();
+    stmt2.close();
+
+    // 6. Cerrar conexión
+    conn.close();
+
+    // 7. Devolver respuesta
+    let resp = {
+      status: "OK",
+      message: "Registro insertado correctamente en Paciente e Informacion_financiera",
+      pacienteInsertado: filasPac,
+      financieraInsertada: filasFin,
+      saldoCalculado: saldo
+    };
+    return ContentService.createTextOutput(JSON.stringify(resp))
+                        .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (error) {
+    let respError = {
+      status: "ERROR",
+      message: error.message
+    };
+    return ContentService.createTextOutput(JSON.stringify(respError))
+                        .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function getDBConnection() {
+  let host     = 'bgsaqzg7ilz9xisbmpq4-mysql.services.clever-cloud.com';
+  let dbName   = 'bgsaqzg7ilz9xisbmpq4';
+  let user     = 'u4zbbye7sg2wamud';
+  let password = '516Wm23ZxVnuBR29RsTc'; // ¡No lo subas a repos públicos!
+  let port     = 3306;
+
+  let url = ⁠ jdbc:mysql://${host}:${port}/${dbName}?useSSL=false ⁠;
+  return Jdbc.getConnection(url, user, password);
+}
